@@ -11,6 +11,7 @@ public interface OrderPlugin {
 
 public boolean isTypeSupported(Class<?> type);
 	
-	public Expression<?> getPath(CriteriaQuery<?> query, CriteriaBuilder criteriaBuilder, Path<?> path, Class<?> type) throws FilterException;
+	@SuppressWarnings("rawtypes")
+	public Expression<?> getPath(CriteriaQuery query, CriteriaBuilder criteriaBuilder, Path<?> path, Class<?> type) throws FilterException;
 	
 }

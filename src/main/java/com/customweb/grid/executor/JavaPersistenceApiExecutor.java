@@ -82,7 +82,7 @@ public class JavaPersistenceApiExecutor<T> implements Executor<T> {
 	@SuppressWarnings("unchecked")
 	protected synchronized void resetQuery() {
 		query = criteriaBuilder.createQuery();
-		root = query.distinct(true).from(domainClass);
+		root = query.from(domainClass);
 	}
 
 	@SuppressWarnings("unchecked")
