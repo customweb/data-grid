@@ -1,13 +1,14 @@
 package com.customweb.grid.executor;
 
-import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import javax.persistence.EntityManager;
 import javax.persistence.TypedQuery;
 import javax.persistence.criteria.CriteriaBuilder;
 import javax.persistence.criteria.CriteriaQuery;
+import javax.persistence.criteria.Expression;
 import javax.persistence.criteria.Order;
 import javax.persistence.criteria.Path;
 import javax.persistence.criteria.Predicate;
@@ -16,6 +17,11 @@ import javax.persistence.criteria.Root;
 import com.customweb.grid.filter.FieldFilter;
 import com.customweb.grid.filter.OrderBy;
 import com.customweb.grid.filter.ResultFilter;
+import com.customweb.grid.jpa.plugin.filter.FilterException;
+import com.customweb.grid.jpa.plugin.filter.FilterPlugin;
+import com.customweb.grid.jpa.plugin.filter.FilterPluginProvider;
+import com.customweb.grid.jpa.plugin.order.OrderPlugin;
+import com.customweb.grid.jpa.plugin.order.OrderPluginProvider;
 import com.customweb.grid.util.Property;
 
 public class JavaPersistenceApiExecutor<T> implements Executor<T> {
@@ -28,6 +34,9 @@ public class JavaPersistenceApiExecutor<T> implements Executor<T> {
 	@SuppressWarnings("rawtypes")
 	private CriteriaQuery query;
 	private Class<T> domainClass;
+	
+	private List<FilterPlugin> filterPlugins = FilterPluginProvider.getPlugins();
+	private List<OrderPlugin> orderPlugins = OrderPluginProvider.getPlugins();
 
 	@Override
 	public Class<?> getDomainClass() {
@@ -38,6 +47,16 @@ public class JavaPersistenceApiExecutor<T> implements Executor<T> {
 		this.entityManager = entityManager;
 		this.domainClass = clazz;
 		criteriaBuilder = entityManager.getCriteriaBuilder();
+	}
+	
+	public JavaPersistenceApiExecutor<T> addFilterPlugins(FilterPlugin... filterPlugins) {
+		this.filterPlugins.addAll(Arrays.asList(filterPlugins));
+		return this;
+	}
+	
+	public JavaPersistenceApiExecutor<T> addOrderPlugins(OrderPlugin... orderPlugins) {
+		this.orderPlugins.addAll(Arrays.asList(orderPlugins));
+		return this;
 	}
 
 	@Override
@@ -101,7 +120,7 @@ public class JavaPersistenceApiExecutor<T> implements Executor<T> {
 		}
 
 		if (operator == null) {
-			if (String.class.isAssignableFrom(fieldType) || fieldType.isEnum()) {
+			if (String.class.isAssignableFrom(fieldType)) {
 				operator = "contains";
 			} else {
 				operator = "=";
@@ -113,54 +132,39 @@ public class JavaPersistenceApiExecutor<T> implements Executor<T> {
 
 		Path path = getPathCompletePath(root, fieldFilter.getFieldName());
 
-		if (fieldType.isEnum()) {
-			try {
-				for (Method method : fieldType.getDeclaredMethods()) {
-					if (method.getName().equals("valueOf")) {
-
-						for (Object constant : fieldType.getEnumConstants()) {
-							String constantName = constant.toString();
-							if (operator.equals("=")) {
-								if (constantName.equalsIgnoreCase(fieldFilter.getValue())) {
-									Object value = method.invoke(null, constantName);
-									clause = criteriaBuilder.and(clause, criteriaBuilder.equal(path, value));
-								}
-							} else {
-								String constantNameLower = constantName.toLowerCase();
-
-								if (constantNameLower.contains(fieldFilter.getValue().toLowerCase())) {
-									Object value = method.invoke(null, constantName);
-									clause = criteriaBuilder.and(clause, criteriaBuilder.equal(path, value));
-								}
-							}
+		Predicate filterPredicate = null;
+		try {
+			if (this.filterPlugins != null && !this.filterPlugins.isEmpty()) {
+				for (FilterPlugin plugin : this.filterPlugins) {
+					if (plugin.isTypeSupported(fieldType)) {
+						try {
+							filterPredicate = plugin.getClause(query, criteriaBuilder, operator, path, fieldType, fieldFilter.getValue());
+							break;
+						} catch (FilterException e) {
 						}
-						break;
 					}
 				}
-			} catch (Exception e) {
-				e.printStackTrace();
 			}
-		} else if (boolean.class.isAssignableFrom(fieldType)) {
-			if (fieldFilter.getValue().equalsIgnoreCase("true")) {
-				boolean value = true;
-				clause = criteriaBuilder.and(clause, criteriaBuilder.equal(path, value));
-			} else if (fieldFilter.getValue().equalsIgnoreCase("false")) {
-				boolean value = false;
-				clause = criteriaBuilder.and(clause, criteriaBuilder.equal(path, value));
+			if (filterPredicate == null) {
+				if (operator.equals(">")) {
+					Integer value = new Integer(fieldFilter.getValue());
+					filterPredicate = criteriaBuilder.gt(path, value);
+				} else if (operator.equals("<")) {
+					Integer value = new Integer(fieldFilter.getValue());
+					filterPredicate = criteriaBuilder.lt(path, value);
+				} else if (operator.equals("=")) {
+					filterPredicate = criteriaBuilder.equal(path, fieldFilter.getValue());
+				} else if (operator.equals("contains")) {
+					String value = "%" + fieldFilter.getValue() + "%";
+					filterPredicate = criteriaBuilder.like(criteriaBuilder.lower(path), criteriaBuilder.lower(criteriaBuilder.literal("%" + value + "%")));
+				}
 			}
-		} else {
-			if (operator.equals(">")) {
-				Integer value = new Integer(fieldFilter.getValue());
-				clause = criteriaBuilder.and(clause, criteriaBuilder.gt(path, value));
-			} else if (operator.equals("<")) {
-				Integer value = new Integer(fieldFilter.getValue());
-				clause = criteriaBuilder.and(clause, criteriaBuilder.lt(path, value));
-			} else if (operator.equals("=")) {
-				clause = criteriaBuilder.and(clause, criteriaBuilder.equal(path, fieldFilter.getValue()));
-			} else if (operator.equals("contains")) {
-				String value = "%" + fieldFilter.getValue() + "%";
-				clause = criteriaBuilder.and(clause, criteriaBuilder.like(path, value));
-			}
+		} catch (Exception e) {
+			filterPredicate = criteriaBuilder.equal(criteriaBuilder.literal(1), 0);
+		}
+		
+		if (filterPredicate != null) {
+			clause = criteriaBuilder.and(clause, filterPredicate);
 		}
 		return clause;
 	}
@@ -169,8 +173,26 @@ public class JavaPersistenceApiExecutor<T> implements Executor<T> {
 		// Order By
 		List<Order> orderBys = new ArrayList<Order>();
 		for (OrderBy orderBy : filter.getOrderBys()) {
-			@SuppressWarnings("rawtypes")
-			Path path = getPathCompletePath(root, orderBy.getFieldName());
+			Class<?> fieldType = Object.class;
+			try {
+				fieldType = Property.getPropertyDataType(domainClass, orderBy.getFieldName());
+			} catch (Exception e) {
+				e.printStackTrace();
+			}
+			
+			Expression<?> path = getPathCompletePath(root, orderBy.getFieldName());
+			if (this.orderPlugins != null && !this.orderPlugins.isEmpty()) {
+				for (OrderPlugin plugin : this.orderPlugins) {
+					if (plugin.isTypeSupported(fieldType)) {
+						try {
+							path = plugin.getPath(query, criteriaBuilder, (Path<?>) path, fieldType);
+							break;
+						} catch (FilterException e) {
+						}
+					}
+				}
+			}
+			
 			if (orderBy.isSortAscending()) {
 				orderBys.add(criteriaBuilder.asc(path));
 			} else {
