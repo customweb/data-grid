@@ -1,0 +1,26 @@
+// ====== Gradle Build Script for wallee-applications ======
+
+// ------ Plugins ------
+
+buildscript {
+  repositories {
+    maven { url 'http://localhost:32257/artifactory/repo/' }
+  }
+
+  dependencies {
+    classpath 'io.wallee:buildtools:0.1.+'
+  }
+}
+
+group = 'com.customweb'
+ext.buildVersion = '1.0.0'
+
+apply plugin: 'io.wallee.single-java-project'
+
+
+// ------ Dependencies ------
+
+dependencies {
+  compile "javax:javaee-api:6.0"
+}
+
