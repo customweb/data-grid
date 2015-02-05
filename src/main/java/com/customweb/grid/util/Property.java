@@ -38,7 +38,7 @@ public final class Property {
 	}
 
 	public static Field getFieldByFieldName(Class<?> clazz, String propertyName) {
-		Field[] fields = clazz.getDeclaredFields();
+		Field[] fields = clazz.getFields();
 		for (Field field : fields) {
 			if (field.getName().equals(propertyName)) {
 				return field;
@@ -47,7 +47,6 @@ public final class Property {
 		if (clazz.getSuperclass() != null) {
 			return getFieldByFieldName(clazz.getSuperclass(), propertyName);
 		}
-
 		return null;
 	}
 
@@ -58,7 +57,7 @@ public final class Property {
 	}
 
 	public static Method getMethodByMethodName(Class<?> clazz, String methodName) {
-		Method[] methods = clazz.getDeclaredMethods();
+		Method[] methods = clazz.getMethods();
 		for (Method method : methods) {
 			if (method.getName().equals(methodName)) {
 				return method;
